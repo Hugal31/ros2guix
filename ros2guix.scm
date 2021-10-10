@@ -3,12 +3,15 @@
 
 (use-modules (debugging assert)
              (ice-9 pretty-print)
+             (ice-9 string-fun)
              (guix build download)
              (guix build utils)
              (guix scripts)
              (srfi srfi-1)
+             (srfi srfi-9)
              (srfi srfi-11)
              (srfi srfi-37)
+             (srfi srfi-43)
              (yaml)
              (web uri))
 
@@ -42,6 +45,15 @@ Convert the given PACKAGES.\n")
   `((ros-distro . ,(getenv "ROS_DISTRO"))
     (packages . ())))
 
+(define-record-type <ros-package>
+  (make-ros-package name url tag version xml)
+  ros-package?
+  (name ros-package-name)
+  (url ros-package-url)
+  (tag ros-package-tag)
+  (version ros-package-version)
+  (xml ros-package-xml))
+
 (define* (main #:optional (args (command-line)))
   (define (parse-options)
     (parse-command-line (cdr args) %options (list %default-options)
@@ -63,8 +75,9 @@ Convert the given PACKAGES.\n")
     (format #t "Using ROS distro ~a\n" ros-distro)
     (format #t "ROS packages: ~a\n" packages)
 
-    (let* ((distribution-cache (fetch-distribution-cache ros-distro)))
-      (pretty-print distribution-cache))))
+    (let* ((distribution-cache (fetch-distribution-cache ros-distro))
+           (ros-package-list (distribution-cache->ros-packages distribution-cache)))
+      (pretty-print ros-package-list))))
 
 (define (fetch-distribution-cache ros-distro)
   (let* ((index (fetch-ros-index))
@@ -79,9 +92,8 @@ Convert the given PACKAGES.\n")
     (let* ((cache (read-yaml-file distribution-cache-file))
            (cache-type (assoc-ref cache "type"))
            (cache-version (string->number (assoc-ref cache "version"))))
-      ;(delete-file distribution-cache-file)
+      (delete-file distribution-cache-file)
       (assert (equal? "cache" cache-type))
-      (assert (eq? 2 cache-version))
       cache)))
 
 (define (fetch-ros-index)
@@ -96,5 +108,47 @@ Convert the given PACKAGES.\n")
 
     index))
 
-;(fetch-distribution-cache "galactic")
-;(main '("ros2guix" "-r" "noetic" "a" "b"))
+(define (distribution-cache->ros-packages cache)
+  (let ((cache-version (string->number (assoc-ref cache "version"))))
+    (assert (eq? 2 cache-version)))
+
+  ;(format #t "cache is ~a\n" (substring (format #f "~a" cache) 0 30))
+  ;(format #t "distribution_file is ~a\n" (substring (format #f "~a" (assoc-ref cache "distribution_file")) 0 30))
+
+  (let* ((distribution-file (assoc-ref cache "distribution_file"))
+                                        ; For now, take the first release platform
+         (release (vector-ref distribution-file 0))
+         (repositories (assoc-ref release "repositories"))
+         (package-xmls (assoc-ref cache "release_package_xmls")))
+
+    (append (map
+             (lambda (repository) (repository->ros-packages repository package-xmls))
+             repositories))))
+
+(define (repository->ros-packages repository packages-xmls)
+  (let* ((repository-name (car repository))
+         (repository-content (cdr repository))
+         (release (assoc-ref repository-content "release"))
+         (packages (vector->list (or (assoc-ref release "packages") (vector repository-name))))
+         (url (assoc-ref release "url"))
+         (release-tag (assoc-ref (assoc-ref release "tags") "release"))
+         (version (assoc-ref release "version")))
+
+    (if release-tag
+        (map
+         (lambda (package-name)
+           (let* ((tag (string-replace-substring
+                        (string-replace-substring release-tag "{package}" package-name)
+                        "{version}"
+                        version))
+                  (xml (assoc-ref packages-xmls package-name)))
+             (make-ros-package
+              package-name
+              url
+              tag
+              version
+              xml)))
+
+         packages)
+
+        '())))
