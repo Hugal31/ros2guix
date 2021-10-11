@@ -12,6 +12,9 @@
              (srfi srfi-11)
              (srfi srfi-37)
              (srfi srfi-43)
+             (sxml simple)
+             ((sxml xpath)
+              #:select (sxpath))
              (yaml)
              (web uri))
 
@@ -46,10 +49,11 @@ Convert the given PACKAGES.\n")
     (packages . ())))
 
 (define-record-type <ros-package>
-  (make-ros-package name url tag version xml)
+  (make-ros-package name url source-url tag version xml)
   ros-package?
   (name ros-package-name)
   (url ros-package-url)
+  (source-url ros-package-source-url)
   (tag ros-package-tag)
   (version ros-package-version)
   (xml ros-package-xml))
@@ -65,19 +69,27 @@ Convert the given PACKAGES.\n")
 
   (let* ((opts (parse-options))
          (ros-distro (assq-ref opts 'ros-distro))
-         (packages (reverse (assq-ref opts 'packages))))
+         (packages-to-convert (assq-ref opts 'packages)))
 
-    (when (not (pair? packages))
+    (when (not (pair? packages-to-convert))
       (error "You must specify at least one ROS package to convert."))
     (when (not ros-distro)
       (error "You must specify a ROS distro."))
 
     (format #t "Using ROS distro ~a\n" ros-distro)
-    (format #t "ROS packages: ~a\n" packages)
+    (format #t "ROS packages: ~a\n" packages-to-convert)
 
     (let* ((distribution-cache (fetch-distribution-cache ros-distro))
-           (ros-package-list (distribution-cache->ros-packages distribution-cache)))
-      (pretty-print ros-package-list))))
+           (ros-packages (distribution-cache->ros-packages distribution-cache))
+           (matching-ros-packages (filter
+                                   (lambda (package)
+                                     (find (lambda (name)
+                                             (equal? name (ros-package-name package)))
+                                           packages-to-convert))
+                                   ros-packages))
+           (guix-packages (map create-guix-package matching-ros-packages)))
+
+      (pretty-print guix-packages))))
 
 (define (fetch-distribution-cache ros-distro)
   (let* ((index (fetch-ros-index))
@@ -121,13 +133,17 @@ Convert the given PACKAGES.\n")
          (repositories (assoc-ref release "repositories"))
          (package-xmls (assoc-ref cache "release_package_xmls")))
 
-    (append (map
-             (lambda (repository) (repository->ros-packages repository package-xmls))
-             repositories))))
+    (apply append (map
+                   (lambda (repository)
+                     (repository->ros-packages repository package-xmls))
+
+                   repositories))))
 
 (define (repository->ros-packages repository packages-xmls)
   (let* ((repository-name (car repository))
          (repository-content (cdr repository))
+         (source (assoc-ref repository-content "source"))
+         (source-url (assoc-ref source "url"))
          (release (assoc-ref repository-content "release"))
          (packages (vector->list (or (assoc-ref release "packages") (vector repository-name))))
          (url (assoc-ref release "url"))
@@ -145,6 +161,7 @@ Convert the given PACKAGES.\n")
              (make-ros-package
               package-name
               url
+              source-url
               tag
               version
               xml)))
@@ -152,3 +169,67 @@ Convert the given PACKAGES.\n")
          packages)
 
         '())))
+
+(define (create-guix-package ros-package)
+  (let* ((sxml (xml->sxml (ros-package-xml ros-package)))
+         ;(_ (pretty-print sxml))
+         (package-name (ros-package-name ros-package))
+         (package-description (ros-package-xml-desc sxml))
+         (package-home-page (ros-package-xml-home-page ros-package sxml))
+         (package-license (ros-package-xml-license sxml))
+         (build-system (guess-build-system sxml))
+         (guix-license (ros-license->guix-license package-license)))
+
+    ;(pretty-print sxml)
+
+    `(define-public ,(string->symbol package-name)
+       (package
+        (name ,package-name)
+        (version ,(ros-package-version ros-package))
+        (source (origin
+                 (method git-fetch)
+                 (uri (git-reference
+                       (url ,(ros-package-url ros-package))
+                       (commit ,(ros-package-tag ros-package))
+                       (file-name (git-file-name name version))))))
+        (build-system ,build-system)
+        (native-inputs '())
+        (inputs '())
+        (propataged-inputs '())
+        (home-page ,package-home-page)
+        (synopsis ,(format #f "ROS package ~a" package-name))
+        (description ,package-description)
+        (license ,guix-license)))))
+
+(define (guess-build-system sxml)
+  (let* ((build-type (first (ros-package-xml-exported-build-type sxml))))
+
+    (cond
+     ((equal? build-type "ament_cmake") 'ament-build-system)
+     (else (error "Could not guess build type for package.xml:" sxml)))))
+
+(define ros-package-xml-exported-build-type
+  (sxpath '(package export build_type *text*)))
+
+(define (ros-package-xml-home-page ros-package sxml)
+  (let ((home-pages ((sxpath '(package url *text*)) sxml)))
+    (if (null? home-pages)
+        (ros-package-source-url ros-package)
+        (first home-pages))))
+
+(define (ros-package-xml-desc sxml)
+  (first ((sxpath '(package description *text*)) sxml)))
+
+(define (ros-package-xml-license sxml)
+  (first ((sxpath '(package license *text*)) sxml)))
+
+(define (ros-license->guix-license ros-license)
+  (let ((guix-license (assoc-ref ros-licenses-to-guix-assoc ros-license)))
+    (when (not guix-license)
+      (error "Unknown Guix equivalent for license" ros-license))
+
+    guix-license))
+
+(define ros-licenses-to-guix-assoc
+  '(("Apache License 2.0" . license:asl2.0)
+    ("BSD" . license:bsd-3)))
