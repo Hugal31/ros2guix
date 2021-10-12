@@ -2,10 +2,16 @@
 !#
 
 (use-modules (debugging assert)
+             (ice-9 match)
              (ice-9 pretty-print)
              (ice-9 string-fun)
+             (ice-9 vlist)
+             (gnu packages)
              (guix build download)
              (guix build utils)
+             (guix describe)
+             (guix diagnostics)
+             (guix memoization)
              (guix scripts)
              (srfi srfi-1)
              (srfi srfi-9)
@@ -200,6 +206,42 @@ Convert the given PACKAGES.\n")
         (synopsis ,(format #f "ROS package ~a" package-name))
         (description ,package-description)
         (license ,guix-license)))))
+
+(define (guess-package-imports package-definition)
+  (let* ((package (third package-definition))
+         (build-system (car (assq-ref package 'build-system)))
+         (native-inputs (car (assq-ref package 'native-inputs)))
+         (inputs (car (assq-ref package 'inputs)))
+         (propagated-inputs (car (assq-ref package 'propagated-inputs)))
+         (total-inputs (append (cadr native-inputs) (cadr inputs) (cadr propagated-inputs)))
+         (total-inputs-symbols (delete-duplicates! (map cadadr total-inputs) eq?)))
+
+    (delete-duplicates! (map m-symbol->module total-inputs-symbols) eq?)))
+
+(define (symbol->module symbol)
+  "Resolve symbol to a module path"
+
+  (match (assq-ref hard-coded-symbol->module-map symbol)
+    (#f
+     (match (find-package-locations (symbol->string symbol))
+       (() (error "Could not find package location for " symbol))
+       (locations
+        (map string->symbol
+             (string-split
+              (first (string-split
+                      ;; Pick the first for now
+                      (location-file (cdar locations))
+                      #\.))
+              #\/)))))
+
+    (s s)))
+
+(define m-symbol->module (memoize symbol->module))
+
+(define hard-coded-symbol->module-map
+  '((git-fetch . (guix git-download))
+    (git-reference . (guix git-download))
+    (git-file-name . (guix git-download))))
 
 (define (guess-build-system sxml)
   (let* ((build-type (first (ros-package-xml-exported-build-type sxml))))
