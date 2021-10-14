@@ -3,7 +3,9 @@
 
 (use-modules (debugging assert)
              (ice-9 match)
+             (ice-9 popen)
              (ice-9 pretty-print)
+             (ice-9 rdelim)
              (ice-9 string-fun)
              (ice-9 vlist)
              (gnu packages)
@@ -44,7 +46,7 @@ Convert the given PACKAGES.\n")
 (define %options
   (list (option '(#\a "all") #f #f
                 (lambda (_1 _2 _3 result)
-                  (alist-cons 'all-packages #t result)))
+                  (alist-cons 'all-packages? #t result)))
         (option '(#\r "ros-distro") #t #f
                    (lambda (opt name arg result)
                      (alist-cons 'ros-distro arg result)))
@@ -54,7 +56,7 @@ Convert the given PACKAGES.\n")
 
 (define %default-options
   ;; Alist of default option values.
-  `((all-packages . #f)
+  `((all-packages? . #f)
     (ros-distro . ,(getenv "ROS_DISTRO"))
     (packages . ())))
 
@@ -82,13 +84,9 @@ Convert the given PACKAGES.\n")
          (packages-to-process (assq-ref opts 'packages))
          (packages-pred
           (cond
-           ((assq-ref opts 'all-packages)
-            (lambda (_) #t))
-           ((pair? packages-to-process)
-            (lambda (package)
-              (find (lambda (name)
-                      (equal? name (ros-package-name package)))
-                    packages-to-process)))
+           ((assq-ref opts 'all-packages?) (const #t))
+           ((pair? packages-to-process) (lambda (package)
+                                          (member (ros-package-name package) packages-to-process)))
            (else (error "You must specify at least one ROS package to convert.")))))
 
     (when (not ros-distro)
@@ -115,7 +113,8 @@ Convert the given PACKAGES.\n")
 (define %default-modules
   '(((guix licenses) #:prefix license:)
     (guix git-download)
-    (guix packages)))
+    (guix packages)
+    (ros galactic build-system)))
 
 (define (fetch-distribution-cache ros-distro)
   (let* ((index (fetch-ros-index))
@@ -124,7 +123,6 @@ Convert the given PACKAGES.\n")
          (distribution-cache-url (assoc-ref distribution "distribution_cache"))
          (distribution-cache-zipped-file (url-fetch distribution-cache-url (string-append distribution-cache-file ".gz"))))
 
-    (pretty-print distribution-cache-file)
     (invoke "gzip" "-fd" distribution-cache-zipped-file)
 
     (let* ((cache (read-yaml-file distribution-cache-file))
@@ -211,7 +209,8 @@ Convert the given PACKAGES.\n")
                 ((native-inputs inputs propagated-inputs) (guess-package-dependencies sxml))
                 ((native-inputs) `(list ,@(map format-package-def native-inputs)))
                 ((inputs) `(list ,@(map format-package-def inputs)))
-                ((propagated-inputs) `(list ,@(map format-package-def propagated-inputs))))
+                ((propagated-inputs) `(list ,@(map format-package-def propagated-inputs)))
+                ((package-hash) (get-package-hash ros-package)))
 
     ;(pretty-print sxml)
 
@@ -224,7 +223,9 @@ Convert the given PACKAGES.\n")
                  (uri (git-reference
                        (url ,(ros-package-url ros-package))
                        (commit ,(ros-package-tag ros-package))
-                       (file-name (git-file-name name version))))))
+                       (file-name (git-file-name name version))))
+                 (sha256
+                  (base32 ,package-hash))))
         (build-system ,build-system)
         (native-inputs ,native-inputs)
         (inputs ,inputs)
@@ -233,6 +234,23 @@ Convert the given PACKAGES.\n")
         (synopsis ,(format #f "ROS package ~a" package-name))
         (description ,package-description)
         (license ,guix-license)))))
+
+(define (get-package-hash package)
+  (let* ((url (ros-package-url package))
+         (tag (ros-package-tag package))
+         (directory (mkdtemp (string-append "/tmp/" (ros-package-name package) "_XXXXXX")))
+         (_ (invoke "git" "clone" url "--branch" tag  "--depth" "1" directory))
+         (hash (get-output (string-append "guix hash -rx " directory))))
+
+    (delete-file-recursively directory)
+
+    hash))
+
+(define (get-output command)
+  (let* ((port (open-input-pipe command))
+         (str (read-line port)))
+    (close-pipe port)
+    str))
 
 (define (guess-package-dependencies ros-package-sxml)
   "Given a <ros-package>, return a three-sized list of native-inputs,
@@ -314,6 +332,7 @@ inputs and propagated inputs guix-like names"
     (cond
      ((equal? build-type "ament_cmake") 'ament-cmake-build-system)
      ((equal? build-type "ament_python") 'ament-python-build-system)
+     ((equal? build-type "cmake") 'cmake-build-system)
      (else (error "Could not guess build type for package.xml:" sxml build-type)))))
 
 (define ros-package-xml-exported-build-type
@@ -355,5 +374,7 @@ inputs and propagated inputs guix-like names"
     guix-license))
 
 (define ros-licenses-to-guix-assoc
-  '(("Apache License 2.0" . license:asl2.0)
-    ("BSD" . license:bsd-3)))
+  '(("Apache-2.0" . license:asl2.0)
+    ("Apache License 2.0" . license:asl2.0)
+    ("BSD" . license:bsd-3)
+    ("LGPLv3" . license:lgpl3)))
