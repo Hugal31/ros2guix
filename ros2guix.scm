@@ -47,6 +47,9 @@ Convert the given PACKAGES.\n")
   (list (option '(#\a "all") #f #f
                 (lambda (_1 _2 _3 result)
                   (alist-cons 'all-packages? #t result)))
+        (option '(#\o "output") #t #f
+                (lambda (opt name arg result)
+                  (alist-cons 'output (open-output-file arg) result)))
         (option '(#\r "ros-distro") #t #f
                    (lambda (opt name arg result)
                      (alist-cons 'ros-distro arg result)))
@@ -58,7 +61,8 @@ Convert the given PACKAGES.\n")
   ;; Alist of default option values.
   `((all-packages? . #f)
     (ros-distro . ,(getenv "ROS_DISTRO"))
-    (packages . ())))
+    (packages . ())
+    (output . ,(current-output-port))))
 
 (define-record-type <ros-package>
   (make-ros-package name url source-url tag version xml)
@@ -80,6 +84,7 @@ Convert the given PACKAGES.\n")
                             (alist-cons 'packages (cons arg previous-packages) result)))))
 
   (let* ((opts (parse-options))
+         (output (assq-ref opts 'output))
          (ros-distro (assq-ref opts 'ros-distro))
          (packages-to-process (assq-ref opts 'packages))
          (packages-pred
@@ -102,13 +107,15 @@ Convert the given PACKAGES.\n")
                                     %default-modules
                                     guix-packages))))
 
-      (pretty-print
-       `(define-module (ros ,(string->symbol ros-distro))
-          ,@(apply append (map (lambda (m) `(#:use-module ,m)) imported-modules))))
-      (for-each (lambda (package)
-                  (newline)
-                  (pretty-print package))
-                guix-packages))))
+      (with-output-to-port output
+        (lambda ()
+          (pretty-print
+           `(define-module (ros ,(string->symbol ros-distro) generated)
+              ,@(apply append (map (lambda (m) `(#:use-module ,m)) imported-modules))))
+          (for-each (lambda (package)
+                      (newline)
+                      (pretty-print package))
+                    guix-packages))))))
 
 (define %default-modules
   '(((guix licenses) #:prefix license:)
