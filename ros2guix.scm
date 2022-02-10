@@ -197,7 +197,7 @@ Convert the given PACKAGES.\n")
 
 (define (create-guix-package ros-package)
   (define (format-package-def package-name)
-    `(list ,package-name ,(string->symbol package-name)))
+    (string->symbol package-name))
 
   (let*-values (((sxml) (xml->sxml (ros-package-xml ros-package)))
                 ((package-name) (ros-package-name ros-package))
