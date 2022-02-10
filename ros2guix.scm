@@ -334,8 +334,11 @@ inputs and propagated inputs guix-like names"
     (git-reference . (guix git-download))
     (git-file-name . (guix git-download))))
 
+;; TODO: Some packages (async_web_server_cpp) depends on ament_cmake_ros, but
+;; do not declare their build type in the export section. Try to guess those as well.
 (define (guess-build-system sxml)
-  (let* ((build-type (first (ros-package-xml-exported-build-type sxml))))
+  (let* ((build-types (ros-package-xml-exported-build-type sxml))
+         (build-type (first build-types)))
 
     (cond
      ((equal? build-type "ament_cmake") 'ament-cmake-build-system)
