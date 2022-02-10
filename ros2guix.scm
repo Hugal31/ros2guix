@@ -208,6 +208,7 @@ Convert the given PACKAGES.\n")
 
   (let*-values (((sxml) (xml->sxml (ros-package-xml ros-package)))
                 ((package-name) (ros-package-name ros-package))
+                ((guix-package-name) (ros-package-to-guix package-name))
                 ((package-description) (ros-package-xml-desc sxml))
                 ((package-home-page) (ros-package-xml-home-page ros-package sxml))
                 ((package-license) (ros-package-xml-license sxml))
@@ -221,16 +222,16 @@ Convert the given PACKAGES.\n")
 
     ;(pretty-print sxml)
 
-    `(define-public ,(string->symbol package-name)
+    `(define-public ,(string->symbol guix-package-name)
        (package
-        (name ,package-name)
+        (name ,guix-package-name)
         (version ,(ros-package-version ros-package))
         (source (origin
                  (method git-fetch)
                  (uri (git-reference
                        (url ,(ros-package-url ros-package))
-                       (commit ,(ros-package-tag ros-package))
-                       (file-name (git-file-name name version))))
+                       (commit ,(ros-package-tag ros-package))))
+                 (file-name (git-file-name name version))
                  (sha256
                   (base32 ,package-hash))))
         (build-system ,build-system)
@@ -263,14 +264,6 @@ Convert the given PACKAGES.\n")
   "Given a <ros-package>, return a three-sized list of native-inputs,
 inputs and propagated inputs guix-like names"
 
-  (define (ros-dep-to-guix dep)
-    "Given dep as a string, will return a guix-style dependency name"
-
-    (set! dep (string-replace-substring dep "_" "-"))
-    (set! dep (string-replace-substring dep "python3" "python"))
-
-    dep)
-
   (define (is-propagated-dependency dep)
     "Given a dep as a guix package name, return #t if it is a propagated dependency
      (e.g. a scripting dependnecy)."
@@ -282,7 +275,7 @@ inputs and propagated inputs guix-like names"
   (define (remove-version dep) (car (last-pair dep)))
 
   (define (get-cleaned-guix-dep proc)
-    (map ros-dep-to-guix
+    (map ros-package-to-guix
          (map remove-version (proc ros-package-sxml))))
 
   ;; We do not handle versions for now.
@@ -295,6 +288,14 @@ inputs and propagated inputs guix-like names"
 
     (values build-dependencies dependencies run-dependencies)))
 
+(define (ros-package-to-guix dep)
+  "Given dep as a string, will return a guix-style dependency name"
+
+  (set! dep (string-replace-substring dep "_" "-"))
+  (set! dep (string-replace-substring dep "python3" "python"))
+
+  dep)
+
 (define (guess-package-imports package-definition)
   (let* ((package (third package-definition))
          (build-system (car (assq-ref package 'build-system)))
@@ -302,7 +303,7 @@ inputs and propagated inputs guix-like names"
          (inputs (car (assq-ref package 'inputs)))
          (propagated-inputs (car (assq-ref package 'propagated-inputs)))
          (total-inputs (append (cdr native-inputs) (cdr inputs) (cdr propagated-inputs)))
-         (total-inputs-symbols (delete-duplicates! (map caddr total-inputs) eq?)))
+         (total-inputs-symbols (delete-duplicates! total-inputs eq?)))
 
     (delete-duplicates! (filter-map m-symbol->module total-inputs-symbols) eq?)))
 
