@@ -106,13 +106,13 @@ Convert the given PACKAGES.\n")
                (with-exception-handler
                    (lambda (exn)
                      (format (current-error-port)
-                             "Could not process package ~a: ~a" (ros-package-name package) exn)
+                             "Could not process package ~a: ~a\n" (ros-package-name package) exn)
                      #f)
                  (lambda () (create-guix-package package))
                  #:unwind? #t
                  #:unwind-for-type 'misc-error))
              matching-ros-packages))
-           (guix-packages (filter const try-guix-packages))
+           (guix-packages (filter identity try-guix-packages))
            (imported-modules (delete-duplicates!
                               (fold (lambda (package prev)
                                       (append (guess-package-imports package) prev))
