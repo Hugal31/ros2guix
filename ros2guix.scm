@@ -400,4 +400,5 @@ inputs and propagated inputs guix-like names"
   '(("Apache-2.0" . license:asl2.0)
     ("Apache License 2.0" . license:asl2.0)
     ("BSD" . license:bsd-3)
-    ("LGPLv3" . license:lgpl3)))
+    ("LGPLv3" . license:lgpl3)
+    ("MIT" . license:mit)))
