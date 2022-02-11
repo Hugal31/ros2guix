@@ -5,6 +5,7 @@
              (ice-9 match)
              (ice-9 popen)
              (ice-9 pretty-print)
+             (ice-9 regex)
              (ice-9 rdelim)
              (ice-9 string-fun)
              (ice-9 vlist)
@@ -90,8 +91,12 @@ Convert the given PACKAGES.\n")
          (packages-pred
           (cond
            ((assq-ref opts 'all-packages?) (const #t))
-           ((pair? packages-to-process) (lambda (package)
-                                          (member (ros-package-name package) packages-to-process)))
+           ((eq? 1 (length packages-to-process))
+            (let ((re (make-regexp (car packages-to-process))))
+              (lambda (package) (regexp-exec re (ros-package-name package)))))
+           ((pair? packages-to-process)
+            (lambda (package)
+              (member (ros-package-name package) packages-to-process)))
            (else (error "You must specify at least one ROS package to convert.")))))
 
     (when (not ros-distro)
