@@ -349,14 +349,29 @@ inputs and propagated inputs guix-like names"
 ;; TODO: Some packages (async_web_server_cpp) depends on ament_cmake_ros, but
 ;; do not declare their build type in the export section. Try to guess those as well.
 (define (guess-build-system sxml)
-  (let* ((build-types (ros-package-xml-exported-build-type sxml))
-         (build-type (first build-types)))
+  ;; There is probably something more idiomatic
+  (define (first-or-false l) (if (null? l) #f (car l)))
+
+  (let ((exported-build-type (first-or-false (ros-package-xml-exported-build-type sxml)))
+        (buildtools (ros-package-xml-buildtool-dependencies sxml)))
 
     (cond
-     ((equal? build-type "ament_cmake") 'ament-cmake-build-system)
-     ((equal? build-type "ament_python") 'ament-python-build-system)
-     ((equal? build-type "cmake") 'cmake-build-system)
-     (else (error "Could not guess build type for package.xml:" sxml build-type)))))
+     (exported-build-type
+
+      ;; Guess on the exported build_type
+      (cond
+       ((equal? exported-build-type "ament_cmake") 'ament-cmake-build-system)
+       ((equal? exported-build-type "ament_python") 'ament-python-build-system)
+       ((equal? exported-build-type "cmake") 'cmake-build-system)
+       (else (error "Could not guess build type for package.xml:" sxml exported-build-type))))
+
+     (buildtools
+      ;; Try to guess from the buildtool_depends
+      (match (cadar buildtools)
+        ("ament_cmake_ros" "ament_cmake")
+        (a  (error "Could not guess build type from build tools" a))))
+
+     (else (error "Could not guess the build type:" sxml)))))
 
 (define ros-package-xml-exported-build-type
   (sxpath '(package export build_type *text*)))
@@ -372,6 +387,9 @@ inputs and propagated inputs guix-like names"
 
 (define (ros-package-xml-license sxml)
   (first ((sxpath '(package license *text*)) sxml)))
+
+(define ros-package-xml-buildtool-dependencies
+  (sxpath '(package buildtool_depend)))
 
 (define ros-package-xml-build-dependencies
   (sxpath `(package
