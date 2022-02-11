@@ -22,7 +22,7 @@
              (srfi srfi-43)
              (sxml simple)
              ((sxml xpath)
-              #:select (sxpath node-or))
+              #:select (select-kids sxpath node-join node-or node-self node-reduce node-trace node-typeof?))
              (yaml)
              (web uri))
 
@@ -373,8 +373,18 @@ inputs and propagated inputs guix-like names"
 
      (else (error "Could not guess the build type:" sxml)))))
 
+(define (nodeset-match-ros-condition? nodeset)
+  (define get-condition (sxpath '(@ (condition))))
+  (match (get-condition nodeset)
+    (() #t)
+    ((('condition "$ROS_VERSION == 2")) #t)
+    (_ #f)))
+
 (define ros-package-xml-exported-build-type
-  (sxpath '(package export build_type *text*)))
+  (sxpath
+   `(package export build_type
+             ,(node-self nodeset-match-ros-condition?)
+             *text*)))
 
 (define (ros-package-xml-home-page ros-package sxml)
   (let ((home-pages ((sxpath '(package url *text*)) sxml)))
@@ -396,16 +406,18 @@ inputs and propagated inputs guix-like names"
             ,(node-or
               (sxpath '(buildtool_depend))
               (sxpath '(build_depend))
-              (sxpath '(test_depend))))))
+              (sxpath '(test_depend)))
+            ,(node-self nodeset-match-ros-condition?))))
 
 (define ros-package-xml-dependencies
-  (sxpath '(package depend)))
+  (sxpath '(package depend ,(node-self nodeset-match-ros-condition?))))
 
 (define ros-package-xml-run-dependencies
   (sxpath `(package
             ,(node-or
               (sxpath '(run_depend))
-              (sxpath '(exec_depend))))))
+              (sxpath '(exec_depend)))
+            ,(node-self nodeset-match-ros-condition?))))
 
 (define (ros-license->guix-license ros-license)
   (let ((guix-license (assoc-ref ros-licenses-to-guix-assoc ros-license)))
