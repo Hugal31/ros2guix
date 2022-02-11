@@ -100,7 +100,19 @@ Convert the given PACKAGES.\n")
     (let* ((distribution-cache (fetch-distribution-cache ros-distro))
            (ros-packages (distribution-cache->ros-packages distribution-cache))
            (matching-ros-packages (filter packages-pred ros-packages))
-           (guix-packages (map create-guix-package matching-ros-packages))
+           (try-guix-packages
+            (map
+             (lambda (package)
+               (with-exception-handler
+                   (lambda (exn)
+                     (format (current-error-port)
+                             "Could not process package ~a: ~a" (ros-package-name package) exn)
+                     #f)
+                 (lambda () (create-guix-package package))
+                 #:unwind? #t
+                 #:unwind-for-type 'misc-error))
+             matching-ros-packages))
+           (guix-packages (filter const try-guix-packages))
            (imported-modules (delete-duplicates!
                               (fold (lambda (package prev)
                                       (append (guess-package-imports package) prev))
