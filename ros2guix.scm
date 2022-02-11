@@ -433,7 +433,9 @@ inputs and propagated inputs guix-like names"
 
 (define ros-licenses-to-guix-assoc
   '(("Apache-2.0" . license:asl2.0)
+    ("Apache 2.0")
     ("Apache License 2.0" . license:asl2.0)
+    ("Apache License, Version 2.0" . license:asl2.0)
     ("BSD" . license:bsd-3)
     ("LGPLv3" . license:lgpl3)
     ("MIT" . license:mit)))
