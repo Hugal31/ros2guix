@@ -66,14 +66,18 @@ Convert the given PACKAGES.\n")
     (output . ,(current-output-port))))
 
 (define-record-type <ros-package>
-  (make-ros-package name url source-url tag version xml)
+  (make-ros-package name url source-url tag version xml sxml)
   ros-package?
   (name ros-package-name)
   (url ros-package-url)
   (source-url ros-package-source-url)
   (tag ros-package-tag)
   (version ros-package-version)
-  (xml ros-package-xml))
+  (xml ros-package-xml)
+  (sxml ros-package-sxml/))
+
+(define (ros-package-sxml p)
+  (force (ros-package-sxml/ p)))
 
 (define* (main #:optional (args (command-line)))
   (define (parse-options)
@@ -105,6 +109,7 @@ Convert the given PACKAGES.\n")
     (let* ((distribution-cache (fetch-distribution-cache ros-distro))
            (ros-packages (distribution-cache->ros-packages distribution-cache))
            (matching-ros-packages (filter packages-pred ros-packages))
+           (ros-packages-with-deps (add-deps matching-ros-packages ros-packages))
            (try-guix-packages
             (map
              (lambda (package)
@@ -116,7 +121,7 @@ Convert the given PACKAGES.\n")
                  (lambda () (create-guix-package package))
                  #:unwind? #t
                  #:unwind-for-type 'misc-error))
-             matching-ros-packages))
+             ros-packages-with-deps))
            (guix-packages (filter identity try-guix-packages))
            (imported-modules (delete-duplicates!
                               (fold (lambda (package prev)
@@ -187,6 +192,39 @@ Convert the given PACKAGES.\n")
 
                    repositories))))
 
+(define (flatten x)
+  "Flatten list for one level"
+
+  (reduce append '() x))
+
+(define (add-deps selected-packages all-packages)
+  "Given a list of ros-packages and the list of all ros-packages,
+return a list of ros-pacakges with all the found dependencies"
+
+  (let* ((dependency-names
+          (flatten (map
+                    (lambda (package)
+                      (map cadr
+                           (ros-package-xml-all-dependencies (ros-package-sxml package))))
+                    selected-packages)))
+         (dependencies
+          (filter identity
+                  (map
+                   (lambda (dep)
+                     ; TODO Log the package we cannot find
+                     (find
+                      (lambda (package)
+                        (equal? dep (ros-package-name package)))
+                      all-packages))
+                   dependency-names)))
+
+         (dep-deps (if (null? dependencies)
+                       '()
+                       (add-deps dependencies all-packages))))
+
+
+    (delete-duplicates! (append selected-packages dep-deps) eq?)))
+
 (define (repository->ros-packages repository packages-xmls)
   (let* ((repository-name (car repository))
          (repository-content (cdr repository))
@@ -206,14 +244,15 @@ Convert the given PACKAGES.\n")
                         "{version}"
                         version))
                   (xml (assoc-ref packages-xmls package-name))
-                  (xml->sxml xml))
+                  (sxml (delay (xml->sxml xml))))
              (make-ros-package
               package-name
               url
               source-url
               tag
               version
-              xml)))
+              xml
+              sxml)))
 
          packages)
 
@@ -223,7 +262,7 @@ Convert the given PACKAGES.\n")
   (define (format-package-def package-name)
     (string->symbol package-name))
 
-  (let*-values (((sxml) (xml->sxml (ros-package-xml ros-package)))
+  (let*-values (((sxml) (ros-package-sxml ros-package))
                 ((package-name) (ros-package-name ros-package))
                 ((guix-package-name) (ros-package-to-guix package-name))
                 ((package-description) (ros-package-xml-desc sxml))
@@ -423,6 +462,12 @@ inputs and propagated inputs guix-like names"
               (sxpath '(run_depend))
               (sxpath '(exec_depend)))
             ,(node-self nodeset-match-ros-condition?))))
+
+(define ros-package-xml-all-dependencies
+  (node-or
+   ros-package-xml-build-dependencies
+   ros-package-xml-dependencies
+   ros-package-xml-run-dependencies))
 
 (define (ros-license->guix-license ros-license)
   (let ((guix-license (assoc-ref ros-licenses-to-guix-assoc ros-license)))
