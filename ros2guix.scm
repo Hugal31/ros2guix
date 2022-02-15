@@ -31,6 +31,7 @@
   "https://raw.githubusercontent.com/ros/rosdistro/master/")
 (define ros-distro-index
   (string-append base-rosdistro-url "index-v4.yaml"))
+(define %github "github.com")
 
 (define (show-help)
   "Show help"
@@ -314,7 +315,37 @@ return a list of ros-pacakges with all the found dependencies"
         (description ,package-description)
         (license ,guix-license)))))
 
+(define (remove-suffix/read-only str suffix)
+  "Remove suffix if it is at the end of str"
+  (if (string-suffix? suffix str)
+      (substring/read-only str 0 (- (string-length str) (string-length suffix)))
+      str))
+
 (define (get-package-hash package)
+  "Try to use ZIP download if possible, otherwise use VCS"
+  (if (string-contains (ros-package-url package) %github)
+      (get-package-hash/github-archive package)
+      (get-package-hash/git package)))
+
+(define (get-package-hash/github-archive package)
+  (let* ((url (ros-package-url package))
+         (tag (ros-package-tag package))
+         (package-name (ros-package-name package))
+         (directory (mkdtemp (string-append "/tmp/" package-name "_XXXXXX")))
+         (repo-directory (string-append directory "/sources"))
+         (archive-ext ".tar.gz")
+         (archive-name (string-append directory "/" package-name archive-ext))
+         (archive-url (string-append (remove-suffix/read-only url ".git") "/archive/refs/heads/" tag archive-ext))
+         (archive-file (url-fetch archive-url archive-name))
+         (_ (mkdir repo-directory))
+         (_ (invoke "tar" "-xzf" archive-file "-C" repo-directory "--strip-components" "1"))
+         (hash (get-output (string-append "guix hash -r " repo-directory))))
+
+    (delete-file-recursively directory)
+
+    hash))
+
+(define (get-package-hash/git package)
   (let* ((url (ros-package-url package))
          (tag (ros-package-tag package))
          (directory (mkdtemp (string-append "/tmp/" (ros-package-name package) "_XXXXXX")))
