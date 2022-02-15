@@ -39,7 +39,11 @@ Convert the given PACKAGES.\n")
   (display "
   -h, --help             display this help and exit")
   (display "
+  -a, --all              convert all the packages in the distribution")
+  (display "
   -r, --ros-distro       specify ros distro")
+  (display "
+  -e, --regex            evaluate [PACKAGES] as regular expressions")
   (display "
   -V, --version          display version information and exit"))
 
@@ -48,6 +52,9 @@ Convert the given PACKAGES.\n")
   (list (option '(#\a "all") #f #f
                 (lambda (_1 _2 _3 result)
                   (alist-cons 'all-packages? #t result)))
+        (option '(#\e "regex") #f #f
+                (lambda (opt name arg result)
+                  (alist-cons 'regex #t result)))
         (option '(#\o "output") #t #f
                 (lambda (opt name arg result)
                   (alist-cons 'output (open-output-file arg) result)))
@@ -95,13 +102,14 @@ Convert the given PACKAGES.\n")
          (packages-pred
           (cond
            ((assq-ref opts 'all-packages?) (const #t))
-           ((eq? 1 (length packages-to-process))
-            (let ((re (make-regexp (car packages-to-process))))
-              (lambda (package) (regexp-exec re (ros-package-name package)))))
-           ((pair? packages-to-process)
+           ((null? packages-to-process) (error "You must specify at least one ROS package to convert."))
+           ((assq-ref opts 'regex)
+            (let ((res (map make-regexp packages-to-process)))
+              (lambda (package)
+                (any (lambda (re) (regexp-exec re (ros-package-name package))) res))))
+           (else
             (lambda (package)
-              (member (ros-package-name package) packages-to-process)))
-           (else (error "You must specify at least one ROS package to convert.")))))
+              (member (ros-package-name package) packages-to-process))))))
 
     (when (not ros-distro)
       (error "You must specify a ROS distro."))
