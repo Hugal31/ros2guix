@@ -41,9 +41,11 @@ Convert the given PACKAGES.\n")
   (display "
   -a, --all              convert all the packages in the distribution")
   (display "
+  -e, --regex            evaluate [PACKAGES] as regular expressions")
+  (display "
   -r, --ros-distro       specify ros distro")
   (display "
-  -e, --regex            evaluate [PACKAGES] as regular expressions")
+  -R, --recursive        also get the package dependencies, recursively")
   (display "
   -V, --version          display version information and exit"))
 
@@ -61,6 +63,9 @@ Convert the given PACKAGES.\n")
         (option '(#\r "ros-distro") #t #f
                    (lambda (opt name arg result)
                      (alist-cons 'ros-distro arg result)))
+        (option '(#\R "recursive") #f #f
+                (lambda (opt name arg result)
+                  (alist-cons 'recursive #t result)))
         (option '(#\h "help") #f #f
 	        (lambda _
 	          (show-help)))))
@@ -97,6 +102,7 @@ Convert the given PACKAGES.\n")
 
   (let* ((opts (parse-options))
          (output (assq-ref opts 'output))
+         (recursive (assq-ref opts 'recursive))
          (ros-distro (assq-ref opts 'ros-distro))
          (packages-to-process (assq-ref opts 'packages))
          (packages-pred
@@ -117,7 +123,7 @@ Convert the given PACKAGES.\n")
     (let* ((distribution-cache (fetch-distribution-cache ros-distro))
            (ros-packages (distribution-cache->ros-packages distribution-cache))
            (matching-ros-packages (filter packages-pred ros-packages))
-           (ros-packages-with-deps (add-deps matching-ros-packages ros-packages))
+           (matching-ros-packages (if recursive (add-deps matching-ros-packages ros-packages) matching-ros-packages))
            (try-guix-packages
             (map
              (lambda (package)
@@ -129,7 +135,7 @@ Convert the given PACKAGES.\n")
                  (lambda () (create-guix-package package))
                  #:unwind? #t
                  #:unwind-for-type 'misc-error))
-             ros-packages-with-deps))
+             matching-ros-packages))
            (guix-packages (filter identity try-guix-packages))
            (imported-modules (delete-duplicates!
                               (fold (lambda (package prev)
