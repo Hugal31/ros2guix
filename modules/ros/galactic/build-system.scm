@@ -128,10 +128,6 @@
 
                phases*)
 
-   ;; (modify-phases ,phases
-   ;;       (add-after 'build 'install-and-source
-   ;;         (lambda args
-   ;;           (format #t "install-and-source in~a\n" (getcwd)))))
    arguments))
 
 (define-public ament-cmake-build-system
