@@ -305,6 +305,7 @@ return a list of ros-pacakges with all the found dependencies"
                  (sha256
                   (base32 ,package-hash))))
         (build-system ,build-system)
+        (arguments '(#:tests? #f))
         (native-inputs ,native-inputs)
         (inputs ,inputs)
         (propagated-inputs ,propagated-inputs)
@@ -361,10 +362,17 @@ inputs and propagated inputs guix-like names"
 (define (ros-package-to-guix dep)
   "Given dep as a string, will return a guix-style dependency name"
 
-  (set! dep (string-replace-substring dep "_" "-"))
-  (set! dep (string-replace-substring dep "python3" "python"))
+  (define hard-coded-mapping
+    '(("pydocstyle" . "python-pydocstyle")))
 
-  dep)
+  (define (conversion-heuristic dep)
+    (set! dep (string-replace-substring dep "_" "-"))
+    (set! dep (string-replace-substring dep "python3" "python"))
+
+    dep)
+
+  (or (assoc-ref hard-coded-mapping dep)
+      (conversion-heuristic dep)))
 
 (define (guess-package-imports package-definition)
   (let* ((package (third package-definition))
