@@ -4,7 +4,10 @@
   #:use-module (ice-9 ftw)
   #:use-module (ice-9 match)
   #:use-module (ice-9 rdelim)
+  #:use-module (rnrs bytevectors)
+  #:use-module (rnrs io ports)
   #:use-module (srfi srfi-1)
+  #:use-module (srfi srfi-26)
   #:export (%standard-phases))
 
 (define (is-dsv? file)
@@ -15,6 +18,32 @@
       (equal? ".." file)))
 
 (define is-not-dot-dot? (negate is-dot-or-dot-dot?))
+
+(define shebang (string->utf8 "#!"))
+
+(define (starts-with-shebang file)
+  "Looks if the file file starts with shebang"
+  (bytevector=?
+   shebang
+   (call-with-input-file file
+     (cut get-bytevector-n <> (bytevector-length shebang))
+     #:binary #t)))
+
+(define (is-script? file)
+  "Return true if file is a regular executable file starting with a schebang"
+  (and
+   (access? file X_OK)
+   (eq? 'regular (stat:type (stat file)))
+   (starts-with-shebang file)))
+
+(define (is-script-python? file)
+  "Return true if the first line of the file contains python. Do not re-check if is-script?"
+  (call-with-input-file file
+    (lambda (port)
+      (string-contains
+       (read-line port)
+       "python"
+       2))))
 
 (define* (source-ament-env
           #:key outputs #:allow-other-keys #:rest args)
@@ -35,6 +64,7 @@
       (format #t "Will prepend ~a to ~a\n" values envvar)
 
       (let* ((values (map (lambda (value) (string-append install-prefix "/" value)) values))
+             (envvar (if (equal? "PYTHONPATH" envvar) "GUIX_PYTHONPATH" envvar))
              (original-env (or (getenv envvar) ""))
              (original-env-splitted (string-split original-env #\:))
              (new-env (fold
@@ -99,6 +129,72 @@
 
     #t))
 
+; Python wrap, for reference
+(define* (python-wrap #:key inputs outputs #:allow-other-keys)
+  (define (list-of-files dir)
+    (find-files dir (lambda (file stat)
+                      (and (eq? 'regular (stat:type stat))
+                           (not (wrapped-program? file))))))
+
+  (define bindirs
+    (append-map (match-lambda
+                  ((_ . dir)
+                   (list (string-append dir "/bin")
+                         (string-append dir "/sbin"))))
+                outputs))
+
+  ;; Do not require "bash" to be present in the package inputs
+  ;; even when there is nothing to wrap.
+  ;; Also, calculate (sh) only once to prevent some I/O.
+  (define %sh (delay (search-input-file inputs "bin/bash")))
+  (define (sh) (force %sh))
+
+  (let* ((var `("GUIX_PYTHONPATH" prefix
+                ,(search-path-as-string->list
+                  (or (getenv "GUIX_PYTHONPATH") "")))))
+    (for-each (lambda (dir)
+                (let ((files (list-of-files dir)))
+                  (for-each (cut wrap-program <> #:sh (sh) var)
+                            files)))
+              bindirs)))
+
+; Heavily inspired by guix/build/python-build-system.
+(define* (wrap
+          #:key inputs outputs
+          #:allow-other-keys #:rest args)
+
+  (define (list-of-files dir)
+    (find-files dir (lambda (file stat)
+                      (and (is-script? file)
+                           (not (wrapped-program? file))))))
+
+  (define bindirs
+    (append-map (match-lambda
+                  ((_ . dir)
+                   (list (string-append dir "/bin")
+                         (string-append dir "/sbin"))))
+                outputs))
+
+  ;; Do not require "bash" to be present in the package inputs
+  ;; even when there is nothing to wrap.
+  ;; Also, calculate (sh) only once to prevent some I/O.
+  (define %sh (delay (search-input-file inputs "bin/bash")))
+  (define (sh) (force %sh))
+
+  (let* ((python-var `("GUIX_PYTHONPATH" prefix
+                       ,(search-path-as-string->list
+                         (or (getenv "GUIX_PYTHONPATH") "")))))
+
+    (for-each (lambda (dir)
+                (let ((files (list-of-files dir)))
+                  (for-each
+                   (lambda (file)
+                     (when (is-script-python? file)
+                       (wrap-program file #:sh (sh) python-var)))
+                   files)))
+              bindirs))
+  #t)
+
 (define %cmake-check-phase
   (assq-ref cmake:%standard-phases 'check))
 
@@ -108,4 +204,5 @@
     ;; Unless we use workspaces.
     (delete 'check)
     (add-after 'install 'source-ament-env source-ament-env)
+    (add-after 'source-ament-env 'wrap wrap)
     (add-after 'source-ament-env 'check %cmake-check-phase)))
