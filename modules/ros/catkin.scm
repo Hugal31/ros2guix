@@ -1,4 +1,4 @@
-(define-module (ros galactic catkin)
+(define-module (ros catkin)
   #:use-module (gnu packages check)
   #:use-module (gnu packages time)
   #:use-module (gnu packages python)
@@ -24,14 +24,16 @@
         (base32
          "0mkhm3ix3b0rpsqp6wqw8v1q815wjdkl5nb1fhn5j9p0cndx5sp3"))))
     (build-system python-build-system)
+    (native-inputs
+     (list
+      python-flake8
+      python-mock))
     (propagated-inputs
-     (list python
-           python-dateutil
-           python-docutils
-           python-flake8
-           python-mock
-           python-pyparsing))
+     (list
+      python-dateutil
+      python-docutils
+      python-pyparsing))
     (home-page "https://github.com/ros-infrastructure/catkin_pkg")
-    (synopsis "Standalone Python library for the Catkin package system.")
+    (synopsis "Standalone Python library for the Catkin package system")
     (description "Standalone Python library for the catkin build system.")
     (license license:bsd-3)))
