@@ -19,6 +19,7 @@
              (guix memoization)
              (guix scripts)
              (ros2guix fixes)
+             (ros2guix utils)
              (srfi srfi-1)
              (srfi srfi-9)
              (srfi srfi-11)
@@ -211,11 +212,6 @@ Convert the given PACKAGES.\n")
 
                    repositories))))
 
-(define (flatten x)
-  "Flatten list for one level"
-
-  (reduce append '() x))
-
 (define (add-deps selected-packages all-packages)
   "Given a list of ros-packages and the list of all ros-packages,
 return a list of ros-pacakges with all the found dependencies"
@@ -320,12 +316,6 @@ return a list of ros-pacakges with all the found dependencies"
         (description ,package-description)
         (license ,guix-license)))))
 
-(define (remove-suffix/read-only str suffix)
-  "Remove suffix if it is at the end of str"
-  (if (string-suffix? suffix str)
-      (substring/read-only str 0 (- (string-length str) (string-length suffix)))
-      str))
-
 (define (get-package-hash package)
   "Try to use ZIP download if possible, otherwise use VCS"
   (if (string-contains (ros-package-url package) %github)
@@ -366,20 +356,6 @@ return a list of ros-pacakges with all the found dependencies"
          (str (read-line port)))
     (close-pipe port)
     str))
-
-(define* (delete-duplicates-sorted/reversed list #:optional (= equal?) (acc '()))
-  (match list
-    ((h) (cons h acc))
-    ((h . t) (delete-duplicates-sorted/reversed
-              t
-              =
-              (if (= h (car t)) acc (cons h acc))))
-    (() acc)))
-
-(define* (delete-duplicates-sorted list #:optional (= equal?))
-  "delete-duplicates! for sorted lists"
-
-  (reverse (delete-duplicates-sorted/reversed list =)))
 
 (define (guess-package-dependencies ros-package)
   "Given a <ros-package>, return a three-sized list of native-inputs,
@@ -577,9 +553,9 @@ inputs and propagated inputs guix-like names"
 
 (define ros-licenses-to-guix-assoc
   '(("Apache-2.0" . license:asl2.0)
-    ("Apache 2.0")
+    ("Apache 2.0" . license:asl2.0)
     ("Apache License 2.0" . license:asl2.0)
     ("Apache License, Version 2.0" . license:asl2.0)
     ("BSD" . license:bsd-3)
     ("LGPLv3" . license:lgpl3)
-    ("MIT" . license:mit)))
+    ("MIT" . license:expat)))
