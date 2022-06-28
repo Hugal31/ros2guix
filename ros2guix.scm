@@ -1,6 +1,8 @@
 #!/usr/bin/env -S guile --no-auto-compile -e main -s
 !#
 
+(add-to-load-path (getcwd))
+
 (use-modules (debugging assert)
              (ice-9 match)
              (ice-9 popen)
@@ -16,6 +18,7 @@
              (guix diagnostics)
              (guix memoization)
              (guix scripts)
+             (ros2guix fixes)
              (srfi srfi-1)
              (srfi srfi-9)
              (srfi srfi-11)
@@ -44,7 +47,9 @@ Convert the given PACKAGES.\n")
   (display "
   -e, --regex            evaluate [PACKAGES] as regular expressions")
   (display "
-  -r, --ros-distro       specify ros distro")
+  -o, --output FILE      output the result into FILE")
+  (display "
+  -r, --ros-distro DIST  specify ros distro")
   (display "
   -R, --recursive        also get the package dependencies, recursively")
   (display "
@@ -157,8 +162,7 @@ Convert the given PACKAGES.\n")
 (define %default-modules
   '(((guix licenses) #:prefix license:)
     (guix git-download)
-    (guix packages)
-    (ros galactic build-system)))
+    (guix packages)))
 
 (define (fetch-distribution-cache ros-distro)
   (let* ((index (fetch-ros-index))
@@ -279,13 +283,14 @@ return a list of ros-pacakges with all the found dependencies"
 
   (let*-values (((sxml) (ros-package-sxml ros-package))
                 ((package-name) (ros-package-name ros-package))
+                ((package-fix) (get-package-fix package-name))
                 ((guix-package-name) (ros-package-to-guix package-name))
                 ((package-description) (ros-package-xml-desc sxml))
                 ((package-home-page) (ros-package-xml-home-page ros-package sxml))
                 ((package-license) (ros-package-xml-license sxml))
-                ((build-system) (guess-build-system sxml))
+                ((build-system) (or (package-fix-build-system package-fix) (guess-build-system sxml)))
                 ((guix-license) (ros-license->guix-license package-license))
-                ((native-inputs inputs propagated-inputs) (guess-package-dependencies sxml))
+                ((native-inputs inputs propagated-inputs) (guess-package-dependencies ros-package))
                 ((native-inputs) `(list ,@(map format-package-def native-inputs)))
                 ((inputs) `(list ,@(map format-package-def inputs)))
                 ((propagated-inputs) `(list ,@(map format-package-def propagated-inputs)))
@@ -362,9 +367,25 @@ return a list of ros-pacakges with all the found dependencies"
     (close-pipe port)
     str))
 
-(define (guess-package-dependencies ros-package-sxml)
+(define* (delete-duplicates-sorted/reversed list #:optional (= equal?) (acc '()))
+  (match list
+    ((h) (cons h acc))
+    ((h . t) (delete-duplicates-sorted/reversed
+              t
+              =
+              (if (= h (car t)) acc (cons h acc))))
+    (() acc)))
+
+(define* (delete-duplicates-sorted list #:optional (= equal?))
+  "delete-duplicates! for sorted lists"
+
+  (reverse (delete-duplicates-sorted/reversed list =)))
+
+(define (guess-package-dependencies ros-package)
   "Given a <ros-package>, return a three-sized list of native-inputs,
 inputs and propagated inputs guix-like names"
+
+  (define sxml (ros-package-sxml ros-package))
 
   (define (is-propagated-dependency dep)
     "Given a dep as a guix package name, return #t if it is a propagated dependency
@@ -378,17 +399,41 @@ inputs and propagated inputs guix-like names"
 
   (define (get-cleaned-guix-dep proc)
     (map ros-package-to-guix
-         (map remove-version (proc ros-package-sxml))))
+         (map remove-version (proc sxml))))
 
   ;; We do not handle versions for now.
   (let*-values (((propagated-build-dependencies build-dependencies)
                  (partition! is-propagated-dependency (get-cleaned-guix-dep ros-package-xml-build-dependencies)))
                 ((propagated-dependencies dependencies)
                  (partition! is-propagated-dependency (get-cleaned-guix-dep ros-package-xml-dependencies)))
+
                 ((run-dependencies)
                  (append propagated-build-dependencies propagated-dependencies (get-cleaned-guix-dep ros-package-xml-run-dependencies))))
 
-    (values build-dependencies dependencies run-dependencies)))
+    (let* ((package-fix (get-package-fix (ros-package-name ros-package)))
+           (run-dependencies (delete-duplicates-sorted
+                              (merge (sort! run-dependencies string<?)
+                                     (package-fix-propagated-inputs package-fix)
+                                     string<?)
+                              string=?))
+           (dependencies (lset-difference equal?
+                                          (delete-duplicates-sorted
+                                           (merge (sort! dependencies string<?) (package-fix-inputs package-fix) string<?)
+                                                 string=?)
+                                          run-dependencies))
+           (build-dependencies (lset-difference equal?
+                                                (delete-duplicates-sorted
+                                                 (merge
+                                                  (sort! build-dependencies string<?)
+                                                  (package-fix-native-inputs package-fix)
+                                                  string<?)
+                                                 string=?)
+                                                dependencies
+                                                run-dependencies)))
+      (values
+       (sort! build-dependencies string<?)
+       (sort! dependencies string<?)
+       (sort! run-dependencies string<?)))))
 
 (define (ros-package-to-guix dep)
   "Given dep as a string, will return a guix-style dependency name"
@@ -513,7 +558,8 @@ inputs and propagated inputs guix-like names"
   (sxpath `(package
             ,(node-or
               (sxpath '(run_depend))
-              (sxpath '(exec_depend)))
+              (sxpath '(exec_depend))
+              (sxpath '(buildtool_export_depend)))
             ,(node-self nodeset-match-ros-condition?))))
 
 (define ros-package-xml-all-dependencies
