@@ -3,7 +3,9 @@
   #:use-module (guix build-system cmake)
   #:use-module (guix build-system gnu)
   #:use-module (guix build-system python)
-  #:use-module (guix utils))
+  #:use-module (guix utils)
+  #:export (ament-cmake-build-system
+            ament-python-build-system))
 
 
 ; Packages to import to the builder process
@@ -21,7 +23,7 @@
                     'cmake-minimal-cross
                     'cmake-minimal))))
 
-(define* (lower name
+(define* (cmake-lower name
                 #:key source inputs native-inputs outputs system target
                 (cmake (default-cmake target))
                 #:allow-other-keys
@@ -87,10 +89,10 @@
    #:modules modules
    arguments))
 
-(define-public ament-cmake-build-system
+(define ament-cmake-build-system
   (build-system
     (name 'ament-cmake)
     (description "The Ament build system with CMake")
-    (lower lower)))
+    (lower cmake-lower)))
 
-(define-public ament-python-build-system python-build-system)
+(define ament-python-build-system python-build-system)
