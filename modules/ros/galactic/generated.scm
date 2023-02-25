@@ -11,6 +11,8 @@
   #:use-module
   (gnu packages compression)
   #:use-module
+  (gnu packages benchmark)
+  #:use-module
   (gnu packages elf)
   #:use-module
   (gnu packages networking)
@@ -1753,35 +1755,65 @@
       "The ability to add Google mock-based tests in the ament buildsystem in CMake.")
     (license license:asl2.0)))
 
-;; TODO: Replace with a real mimick
+(define-public mimick
+  (package
+   (name "mimick")
+   (version "0.2.6-2")
+   (source
+    (origin
+     (method git-fetch)
+     (uri (git-reference
+           (url "https://github.com/ros2/Mimick")
+           (commit "f171450b5ebaa3d2538c762a059dfc6ab7a01039")))
+     (file-name (git-file-name name version))
+     (sha256
+      (base32
+        "0j1gf346alnmr0vws4hwl1xbd6cb4a8lpmk39y7bidpahyqn5jpm"))))
+   (build-system cmake-build-system)
+   (home-page "https://github.com/ros2/Mimick")
+   (synopsis "A KISS, cross-platform C mocking library")
+   (description
+    "Mimick aims to be a simple of use and powerful mocking and stubbing library for C.
+
+It doesn't rely on external code generation or compiler plugin to work -- simply link the library to your tests, and you're good to go!")
+   (license license:expat)))
+
 (define-public mimick-vendor
   (package
-    (name "mimick-vendor")
-    (version "0.2.6-2")
-    (source
-      (origin
-        (method git-fetch)
-        (uri (git-reference
-               (url "https://github.com/ros2-gbp/mimick_vendor-release.git")
-               (commit "release/galactic/mimick_vendor/0.2.6-2")))
-        (file-name (git-file-name name version))
-        (sha256
-          (base32
-            "0284k61lh32cad6bpkq17xfr2n3x112g165skn7w4rr627iyhhwq"))))
-    (build-system ament-cmake-build-system)
-    (arguments '(#:tests? #f))
-    (native-inputs
-      (list ament-cmake
-            git
-            ament-lint-auto
-            ament-lint-common))
-    (inputs (list))
-    (propagated-inputs (list))
-    (home-page "https://github.com/Snaipe/Mimick")
-    (synopsis "ROS package mimick_vendor")
-    (description
-      "Wrapper around mimick, it provides an ExternalProject build of mimick.")
-    (license license:asl2.0)))
+   (name "mimick-vendor")
+   (version "0.2.6-2")
+   (source
+    (origin
+     (method git-fetch)
+     (uri (git-reference
+           (url "https://github.com/ros2-gbp/mimick_vendor-release.git")
+           (commit "release/galactic/mimick_vendor/0.2.6-2")))
+     (file-name (git-file-name name version))
+     (sha256
+      (base32
+       "0284k61lh32cad6bpkq17xfr2n3x112g165skn7w4rr627iyhhwq"))))
+   (build-system ament-cmake-build-system)
+   (arguments
+    `(#:tests? #f
+      ;; Prevent CMake from cloning mimick
+      #:phases (modify-phases %standard-phases
+                 (add-before 'configure 'patch-git-download
+                             (lambda* (#:key inputs #:allow-other-keys #:rest keys)
+                                      (substitute* "CMakeLists.txt"
+                                        (("GIT_REPOSITORY .+$")
+                                         (string-append "SOURCE_DIR " (assoc-ref inputs "mimick")))))))))
+   (native-inputs
+    `(("ament-cmake" ,ament-cmake)
+      ("ament-lint-auto" ,ament-lint-auto)
+      ("ament-lint-common" ,ament-lint-common)
+      ("mimick" ,(package-source mimick))))
+   (inputs (list))
+   (propagated-inputs (list))
+   (home-page "https://github.com/Snaipe/Mimick")
+   (synopsis "ROS package mimick_vendor")
+   (description
+    "Wrapper around mimick, it provides an ExternalProject build of mimick.")
+   (license license:asl2.0)))
 
 (define-public launch
   (package
@@ -1868,10 +1900,10 @@
     (native-inputs
       (list ament-cmake
             ament-cmake-copyright
-            launch-testing
-            python-cmake-module))
+            python-cmake-module
+            launch-testing))
     (inputs (list))
-    (propagated-inputs (list))
+    (propagated-inputs (list launch-testing))
     (home-page "https://github.com/ros2/launch.git")
     (synopsis
       "ROS package launch_testing_ament_cmake")
@@ -1936,7 +1968,8 @@
     (native-inputs
       (list ament-cmake
             ament-lint-auto
-            ament-lint-common))
+            ament-lint-common
+            benchmark))
     (inputs (list osrf-testing-tools-cpp))
     (propagated-inputs (list))
     (home-page
