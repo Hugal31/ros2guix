@@ -1,6 +1,9 @@
 (define-module (ros2guix utils)
   #:use-module (ice-9 match)
-  #:export (delete-duplicates-sorted
+  #:use-module (ice-9 pretty-print)
+  #:use-module (srfi srfi-26)
+  #:export (add-or-replace-definition
+            delete-duplicates-sorted
             flatten
             remove-suffix/read-only))
 
@@ -28,3 +31,24 @@
   (if (string-suffix? suffix str)
       (substring/read-only str 0 (- (string-length str) (string-length suffix)))
       str))
+
+(define* (add-or-replace-definition
+          symbol-name
+          new-definition
+          #:optional (read-port (current-input-port)) (write-port (current-output-port)))
+  "Replace a SEXP definition matchin either (define ...) or (define-public)
+  in the current port. Add it at the end if not found."
+
+  (define (pred value)
+    (eq? symbol-name value))
+
+  (let loop ((sexp (read read-port)))
+    (unless (eof-object? sexp)
+      (pretty-print
+       (match sexp
+         (('define-public (? pred) _ ...) `(define-public ,symbol-name ,new-definition))
+         (('define (? pred) _ ...) `(define ,symbol-name ,new-definition))
+         (_ sexp))
+       write-port)
+      (newline)
+      (loop (read read-port)))))
