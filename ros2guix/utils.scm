@@ -10,19 +10,16 @@
             flatten
             remove-suffix/read-only))
 
-(define* (delete-duplicates-sorted/reversed list #:optional (= equal?) (acc '()))
-  (match list
-    ((h) (cons h acc))
-    ((h . t) (delete-duplicates-sorted/reversed
-              t
-              =
-              (if (= h (car t)) acc (cons h acc))))
-    (() acc)))
-
-(define* (delete-duplicates-sorted list #:optional (= equal?))
+;; From GNU Guile manual, SRFI-1.
+(define* (delete-duplicates-sorted lst #:optional (= equal?))
   "delete-duplicates! for sorted lists"
 
-  (reverse (delete-duplicates-sorted/reversed list =)))
+  (fold-right (lambda (elem ret)
+                (if (= elem (first ret))
+                    ret
+                    (cons elem ret)))
+              (list (last lst))
+              lst))
 
 (define (flatten x)
   "Flatten list for one level"
